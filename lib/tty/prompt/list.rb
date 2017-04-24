@@ -14,6 +14,7 @@ module TTY
       include Symbols
 
       HELP = '(Use arrow%s keys, press Enter to select)'
+      QUICK_LIST_HELP = '(Start typing or use arrow%s keys, press Enter to select)'
 
       PAGE_HELP = '(Move up or down to reveal more choices)'
 
@@ -47,6 +48,9 @@ module TTY
         @per_page     = options[:per_page]
         @page_help    = options[:page_help] || PAGE_HELP
         @paginator    = Paginator.new
+        @quick_list   = options[:quick_list]
+        @collected_keys  = ""
+        @last_key_at  = nil
 
         @prompt.subscribe(self)
       end
@@ -110,7 +114,8 @@ module TTY
       #
       # @api public
       def default_help
-        self.class::HELP % [enumerate? ? " or number (1-#{@choices.size})" : '']
+        help = @quick_list ? self.class::QUICK_LIST_HELP : self.class::HELP
+        help % [enumerate? ? " or number (1-#{@choices.size})" : '']
       end
 
       # Set selecting active index using number pad
@@ -162,6 +167,26 @@ module TTY
         !@enum.nil?
       end
 
+      def keypress(event)
+        return unless event.key.name == :alpha || event.key.name == :backspace
+
+        if @last_key_at && Time.now - @last_key_at > 3
+          @collected_keys = ""
+        end
+
+        if event.key.name == :backspace && @collected_keys.length > 0
+          @collected_keys.chop!
+        else
+          @collected_keys += event.value
+        end
+
+        @last_key_at = Time.now
+
+        if found_index = @choices.choices.index { |c| c.name.downcase.starts_with?(@collected_keys) }
+          @active = found_index + 1
+        end
+      end
+
       def keynum(event)
         return unless enumerate?
         value = event.value.to_i
@@ -178,10 +203,12 @@ module TTY
       end
 
       def keyup(*)
+        @collected_keys = ""
         @active = (@active == 1) ? @choices.length : @active - 1
       end
 
       def keydown(*)
+        @collected_keys = ""
         @active = (@active == @choices.length) ? 1 : @active + 1
       end
       alias keytab keydown
@@ -277,6 +304,8 @@ module TTY
           @prompt.decorate(selected_item, @active_color)
         elsif @first_render
           @prompt.decorate(help, @help_color)
+        elsif @quick_list
+          @prompt.decorate(@collected_keys)
         end
       end
 
